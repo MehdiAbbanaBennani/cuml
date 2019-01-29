@@ -77,6 +77,7 @@ namespace unscented {
         int dim_x, dim_z;
         int nPoints;
         T alpha_s, beta_s, kappa_s;
+        bool sqrt;
         // all the workspace related pointers
         int Lwork;
         T *workspace_cholesky;
@@ -85,6 +86,7 @@ namespace unscented {
         // these come from splitting workpace ptr provided by user
         T *P_xz, *P_zz, *X_h, *X, *X_er, *X_h_er;
         T *eig_z, *placeHolder0, *z;
+        T *U;
 
     };
 

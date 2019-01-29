@@ -20,6 +20,7 @@ struct UnKFInputs {
     T alpha, beta, kappa;
     Inverse inv;
     unsigned long long int seed;
+    bool sqrt;
 };
 
 template <typename T>
@@ -41,6 +42,7 @@ protected: // functions
         T alpha_s = params.alpha;
         T beta_s = params.beta;
         T kappa_s = params.kappa;
+        sqrt = params.sqrt;
 
         // cpu mallocs
         Phi = (T *)malloc(dim_x * dim_x * sizeof (T));
@@ -89,15 +91,18 @@ protected: // functions
         updateDevice(H_d, H, dim_z * dim_x);
 
         // kf initialization
+        printf("Step 0 \n");
         Variables<T> vars;
         size_t workspaceSize;
         init(vars, dim_x, dim_z, alpha_s, beta_s, kappa_s, inv,
-             x_est_d, x_up_d, Phi_d, P_up_d, Q_d, R_d, H_d, nullptr,
+             x_est_d, x_up_d, Phi_d, P_up_d, Q_d, R_d, H_d, sqrt, nullptr,
              workspaceSize, cusolver_handle);
         CUDA_CHECK(cudaMalloc((void **)&workspace, workspaceSize));
         init(vars, dim_x, dim_z, alpha_s, beta_s, kappa_s, inv,
-             x_est_d, x_up_d, Phi_d, P_up_d, Q_d, R_d, H_d, workspace,
+             x_est_d, x_up_d, Phi_d, P_up_d, Q_d, R_d, H_d, sqrt, workspace,
              workspaceSize, cusolver_handle);
+
+printf("Step 1 \n");
 
         // for random noise
         std::default_random_engine generator(params.seed);
@@ -105,15 +110,17 @@ protected: // functions
         rmse_x = 0.0; rmse_v = 0.0;
 
         for (int q = 0; q < iterations; q++) {
+
+printf("Step 3 \n");
             predict(vars, cublas_handle);
             // generating measurement
             z[0] = q + distribution(generator);
             updateDevice(z_d, z, dim_z);
-
+printf("Step 4 \n");
             update(vars, z_d, cublas_handle, cusolver_handle);
             // getting update
             updateHost(x_up, x_up_d, dim_x);
-
+printf("Step 5 \n");
             // summing squared ratios
             rmse_v += pow(x_up[1]-1, 2); // true velo is alwsy 1
             rmse_x += pow(x_up[0]-q, 2);
@@ -143,6 +150,7 @@ protected: // variables
     UnKFInputs<T> params;
     T alpha, beta, kappa;
     Inverse inv;
+    bool sqrt;
     T *Phi, *x_up, *x_est, *P_up, *Q, *H, *R, *z; //cpu pointers
     T *x_est_d, *x_up_d, *Phi_d, *P_up_d,
       *Q_d, *R_d, *H_d, *z_d, *workspace; //gpu pointers
@@ -165,14 +173,21 @@ INSTANTIATE_TEST_CASE_P(UnKFTests, UnKFTestF, ::testing::ValuesIn(inputsf));
 
 // double
 const std::vector<UnKFInputs<double> > inputsd = {
-  // { 0.6, 2, 1,  1000,  1e-3,  2.0,  0.0, Inverse::Implicit, 6ULL},
-  // { 0.6, 2, 1,  200,  1e-3,  2.0,  0.0, Inverse::Implicit, 6ULL},
-  // { 0.6, 2, 1, 500,  1e-3,  2.0,  0.0, Inverse::Implicit, 6ULL},
-  // { 0.6, 2, 1, 2000,  1e-3,  2.0,  0.0, Inverse::Implicit, 6ULL},
-  { 0.6, 2, 1,  100,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL},
-  { 0.6, 2, 1,  200,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL},
-  { 0.6, 2, 1,  500,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL},
-  { 0.6, 2, 1, 2000,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL}
+  // { 0.6, 2, 1,  1000,  1e-3,  2.0,  0.0, Inverse::Implicit, 6ULL, false},
+  // { 0.6, 2, 1,  200,  1e-3,  2.0,  0.0, Inverse::Implicit, 6ULL, false},
+  // { 0.6, 2, 1, 500,  1e-3,  2.0,  0.0, Inverse::Implicit, 6ULL, false},
+  // { 0.6, 2, 1, 2000,  1e-3,  2.0,  0.0, Inverse::Implicit, 6ULL, false},
+
+  // { 0.6, 2, 1,  100,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL, false},
+  // { 0.6, 2, 1,  200,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL, false},
+  // { 0.6, 2, 1,  500,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL, false},
+  // { 0.6, 2, 1, 2000,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL, false},
+
+  // SUNKF
+  { 0.6, 2, 1,  100,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL, true},
+  { 0.6, 2, 1,  200,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL, true},
+  { 0.6, 2, 1,  500,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL, true},
+  { 0.6, 2, 1, 2000,  1e-3,  2.0,  0.0, Inverse::Explicit, 6ULL, true}
 };
 typedef UnKFTest<double> UnKFTestD;
 TEST_P(UnKFTestD, RMSEUnderToleranceD) {
