@@ -36,8 +36,9 @@ private:
   bool sqroot;
   // not so much
   const T alfa, beta, kappa;
-  T *P = nullptr, *X = nullptr, *x = nullptr, *M = nullptr;
+  T *P = nullptr, *X = nullptr, *x = nullptr, *M = nullptr, *Temp  = nullptr;
   // M is used for computing the qr decomposition, sqrt(w)*(x - bar(x))
+  // Temp is used for the transposition
   T *workspace_qr_decomp = nullptr;
   // int *info, chol_Lwork, qr_Lwork, info_h;
   int *info, qr_Lwork, info_h;
@@ -55,7 +56,9 @@ private:
     info = (int *)offset;
     offset += alignTo(sizeof(int), granuality);
     M = (T *)offset;
-    offset += alignTo(sizeof(T) * dim * nPoints, granuality);
+    offset += alignTo(sizeof(T) * dim * (nPoints + dim), granuality);
+    Temp = (T *)offset;
+    offset += alignTo(sizeof(T) * dim * (nPoints + dim), granuality);
     return offset;
   }
 
@@ -97,6 +100,7 @@ public:
     info = (int *)((size_t)info + (size_t)workarea);
     workspace_qr_decomp = (T *)((size_t)workspace_qr_decomp + (size_t)workarea);
     M = (T *)((size_t)M + (size_t)workarea);
+    Temp = (T *)((size_t)Temp + (size_t)workarea);
   }
 
   /**
@@ -202,7 +206,7 @@ public:
   
   
   void find_covariance(const int dim, const int nPts, const T *weights, const T *mu,
-                       const T *matrix, T *matrix_diff, T *covariance)
+                       const T *matrix, T *matrix_diff, T *covariance, T* noise)
   {
     // finding the offsets of random points
     matVecAdd(matrix_diff, matrix, mu, T(-1.0), nPts, dim);
@@ -210,40 +214,41 @@ public:
     if (sqroot)
     {
       // Compute the weighted difference matrix
-      CUDA_CHECK(cudaMemset(M, 0, sizeof(T) * dim * nPts));
+      CUDA_CHECK(cudaMemset(M, 0, sizeof(T) * dim *  (nPoints + dim)));
+      CUDA_CHECK(cudaMemset(Temp, 0, sizeof(T) * dim * (nPoints + dim)));
+      CUDA_CHECK(cudaMemset(covariance, 0, sizeof(T) * dim * dim));
 
       T scalar = (T) weights[0];
-      scalarMultiply(matrix_diff, matrix_diff, scalar, dim);
+      scalarMultiply(M, matrix_diff, scalar, dim);
       scalar = std::sqrt(weights[1]);
-      scalarMultiply(matrix_diff + dim, matrix_diff + dim, scalar, dim * (nPoints - 1));
+      scalarMultiply(M + dim, matrix_diff + dim, scalar, dim * (nPoints - 1));
 
-      // Transpose the weighted diffs matrix in order to compute the QR deocmposition with the right input shape 
-      // x_0 is not included in the transpose
-      transpose(matrix_diff + dim, M + dim, dim, nPoints - 1, cublasHandle);
+      // Copy the noise matrix at the end of M 
+      CUDA_CHECK(cudaMemcpy(M + nPoints * dim, noise, sizeof(T) * dim * dim, cudaMemcpyDeviceToDevice));
 
-      // M + dim is now (nPoints -1, dim)
+      // Transpose the weighted diffs (M + dim) to get the right shape for QR 
+      transpose(M + dim, Temp + dim, dim, nPoints - 1, cublasHandle);
 
       // Compute the square root matrix through QR decomposition
       // The covariance parameter values will be later overrided, they are not important (Tau in the  cuBLAS API)
       CUSOLVER_CHECK(LinAlg::cusolverDngeqrf(cusolverHandle,
-                                             nPoints - 1, dim, M + dim, nPoints - 1,
+                                             nPoints - 1, dim, Temp + dim, nPoints - 1,
                                              covariance, workspace_qr_decomp, qr_Lwork, info));
 
       updateHost(&info_h, info, 1);
       ASSERT(info_h == 0, "sigma qr decomposition: error in geqrf, info=%d | expected=0", info_h);
 
       // The upper traingular part of M + dim contains the sqrt values
-      // Transpose the resulting matrix to keep only the lower triangular part in column major format stored in covariance
-      transpose(M + dim, matrix_diff + dim, nPoints - 1, dim, cublasHandle);
+      // Transpose the resulting matrix to keep only the lower triangular part in column major format
+      transpose(Temp + dim, M + dim, nPoints - 1, dim, cublasHandle);
       
-      // Copy the matrix of size (dim, dim ) to covariance, the lower triangular part contains the sqrt matrix values
-      CUDA_CHECK(cudaMemcpy(covariance, matrix_diff + dim, sizeof(T) * dim * dim,
-                        cudaMemcpyDeviceToDevice));
+      // Copy the matrix of size (dim, dim) to covariance, the lower triangular part contains the sqrt matrix values
+      CUDA_CHECK(cudaMemcpy(covariance, M + dim, sizeof(T) * dim * dim, cudaMemcpyDeviceToDevice));
 
       // Update the square root matrix with the cholesky update
       // The argument true corresponds to a positive sum
       bool sign = true;
-      chol_update(covariance, matrix_diff, dim, sign,
+      chol_update(covariance, M, dim, sign,
                   uplo, cusolverHandle,
                   cublasHandle, workspace_chol_decomp, &chol_Lwork);
     }
@@ -261,6 +266,12 @@ public:
       CUBLAS_CHECK(LinAlg::cublasger(cublasHandle, dim, dim, &alfa,
                                      matrix_diff, 1, matrix_diff, 1,
                                      covariance, dim));
+    // Add measurement noise
+    alfa = (T)1.0, beta = (T)1.0;
+    CUBLAS_CHECK(LinAlg::cublasgeam(cublasHandle, CUBLAS_OP_N,
+                            CUBLAS_OP_N, dim, dim,
+                            &alfa, covariance, dim, &beta,
+                            noise, dim, covariance, dim));
     }
   }
 

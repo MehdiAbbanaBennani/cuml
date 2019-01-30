@@ -152,14 +152,7 @@ void predict_xP(Variables<T> &var, cublasHandle_t handle)
     // var.x_est conatins mean, var.X_er offsets, var.P_xx cov
     var.sg->find_mean(var.dim_x, var.nPoints, var.Wm, var.X, var.x_est);
     var.sg->find_covariance(var.dim_x, var.nPoints, var.Wc,
-                            var.x_est, var.X, var.X_er, var.P_xx);
-    // Add system noise
-    alfa = (T)1.0;
-    beta = (T)1.0;
-    CUBLAS_CHECK(cublasgeam(handle, CUBLAS_OP_N,
-                            CUBLAS_OP_N, var.dim_x, var.dim_x,
-                            &alfa, var.P_xx, var.dim_x, &beta,
-                            var.Q, var.dim_x, var.P_xx, var.dim_x));
+                            var.x_est, var.X, var.X_er, var.P_xx, var.Q);
 }
 
 template <typename T>
@@ -178,13 +171,8 @@ void find_P_zz(Variables<T> &var, cublasHandle_t handle)
 {
     // var.eig_z conatins mean, var.X_h offsets, var.P_zz cov
     var.sg->find_mean(var.dim_z, var.nPoints, var.Wm, var.X_h, var.eig_z);
-    var.sg->find_covariance(var.dim_z, var.nPoints, var.Wc, var.eig_z, var.X_h, var.X_h, var.P_zz);
-    // Add measurement noise
-    T alfa = (T)1.0, beta = (T)1.0;
-    CUBLAS_CHECK(cublasgeam(handle, CUBLAS_OP_N,
-                            CUBLAS_OP_N, var.dim_z, var.dim_z,
-                            &alfa, var.P_zz, var.dim_z, &beta,
-                            var.R, var.dim_z, var.P_zz, var.dim_z));
+    var.sg->find_covariance(var.dim_z, var.nPoints, var.Wc, var.eig_z, var.X_h, var.X_h, var.P_zz, var.R);
+    
 }
 
 template <typename T>
@@ -429,11 +417,13 @@ void update(Variables<T> &var, T *_z, cublasHandle_t handle, cusolverDnHandle_t 
     print_matrix(var.x_est, var.dim_x, 1, "x_est");
     print_matrix(var.P_xx, var.dim_x, var.dim_x, "P_xx");
     print_matrix(var.X, var.dim_x, var.nPoints, "X");
+    printf("Wm  %f , %f \n", var.Wm[0], var.Wm[1]);
+    printf("Wc  %f , %f \n", var.Wc[0], var.Wc[1]);
     printf("Tranform to measurement");
     
     transform_to_measurement(var, handle);
     print_matrix(var.X_h, var.dim_z, var.nPoints, "z_est || x_h");
-    
+    print_matrix(var.X_er, var.dim_z, var.nPoints, "z_est || x_h");
     find_P_zz(var, handle);
     
     print_matrix(var.eig_z, var.dim_z, 1, "z_est_bar || eig_z");
