@@ -21,6 +21,7 @@ void print_matrix(T* gpu, int rows, int cols, const std::string& msg){
     T* cpu;
     cpu = (T *)malloc(sizeof(T)*rows*cols);
     updateHost(cpu, gpu, rows*cols);
+    printf("\n\n");
     printf("%s\n", msg.c_str());
     for (int i = 0; i < rows; i++){
         for (int j = 0; j < cols; j++)
@@ -53,6 +54,7 @@ void set(Variables<T> &var, int _dim_x, int _dim_z,
                                               CUBLAS_FILL_MODE_UPPER,
                                               var.dim_x, var.P_zz, var.dim_z,
                                               &var.Lwork));
+
     workspaceSize = 0;
     const size_t granularity = 256;
     var.K = (T *)workspaceSize;
@@ -151,6 +153,7 @@ void predict_xP(Variables<T> &var, cublasHandle_t handle)
     var.sg->find_mean(var.dim_x, var.nPoints, var.Wm, var.X, var.x_est);
     var.sg->find_covariance(var.dim_x, var.nPoints, var.Wc,
                             var.x_est, var.X, var.X_er, var.P_xx);
+    // Add system noise
     alfa = (T)1.0;
     beta = (T)1.0;
     CUBLAS_CHECK(cublasgeam(handle, CUBLAS_OP_N,
@@ -162,7 +165,7 @@ void predict_xP(Variables<T> &var, cublasHandle_t handle)
 template <typename T>
 void transform_to_measurement(Variables<T> &var, cublasHandle_t handle)
 {
-    // transformations in var.X_h
+    // transformations in var.X_h ---- X_h = H * X
     T alfa = (T)1.0, beta = (T)0.0;
     CUBLAS_CHECK(cublasgemm(handle, CUBLAS_OP_N,
                             CUBLAS_OP_N, var.dim_z, var.nPoints,
@@ -176,6 +179,7 @@ void find_P_zz(Variables<T> &var, cublasHandle_t handle)
     // var.eig_z conatins mean, var.X_h offsets, var.P_zz cov
     var.sg->find_mean(var.dim_z, var.nPoints, var.Wm, var.X_h, var.eig_z);
     var.sg->find_covariance(var.dim_z, var.nPoints, var.Wc, var.eig_z, var.X_h, var.X_h, var.P_zz);
+    // Add measurement noise
     T alfa = (T)1.0, beta = (T)1.0;
     CUBLAS_CHECK(cublasgeam(handle, CUBLAS_OP_N,
                             CUBLAS_OP_N, var.dim_z, var.dim_z,
@@ -203,45 +207,19 @@ template <typename T>
 void find_kalman_gain(Variables<T> &var, cublasHandle_t handle, cusolverDnHandle_t handle_sol)
 {
     if (var.sqrt)
-    {
-        // decomposing P_zz (cholesky, as P_zz is symm.)
-        CUSOLVER_CHECK(cusolverDnpotrf(handle_sol,
-                                       CUBLAS_FILL_MODE_UPPER,
-                                       var.dim_z, var.P_zz, var.dim_z,
-                                       var.workspace_cholesky, var.Lwork,
-                                       var.info));
-        int info_h = 0;
-        CUDA_CHECK(cudaMemcpy(&info_h, var.info, sizeof(int), cudaMemcpyDeviceToHost));
-        ASSERT(info_h == 0, "[UnKF] cholesky decomp, info=%d | expected=0", info_h);
+    {   
+        // Not sure about CUBLAS_DIAG_NON_UNIT
+        // Compute P_xz / S_y^T to P_xz || X * S_z^T = alfa * P_xz
+        T alfa = (T)1.0;
+        CUBLAS_CHECK(cublastrsm(handle, CUBLAS_SIDE_RIGHT, var.sg->uplo, CUBLAS_OP_T, CUBLAS_DIAG_NON_UNIT,
+                    var.dim_x, var.dim_z, &alfa, var.P_zz, var.dim_z, var.P_xz, var.dim_x));
+        // Copy P_xz / S_y^T to K
+        CUDA_CHECK(cudaMemcpy(var.K, var.P_xz, sizeof(T) * var.dim_x * var.dim_z,
+                        cudaMemcpyDeviceToDevice));
 
-        make_ID_matrix(var.placeHolder0, var.dim_z);
-
-        // findind P_zz.inv() and placing in placeHolder0
-        CUSOLVER_CHECK(cusolverDnpotrs(handle_sol,
-                                       CUBLAS_FILL_MODE_UPPER,
-                                       var.dim_z, var.dim_z, var.P_zz, var.dim_z,
-                                       var.placeHolder0, var.dim_z, var.info));
-        CUDA_CHECK(cudaMemcpy(&info_h, var.info, sizeof(int), cudaMemcpyDeviceToHost));
-        ASSERT(info_h == 0, "[UnKF], Explicit inversion info=%d | expected=0", info_h);
-
-        T alfa = (T)1.0, beta = (T)0.0;
-        CUBLAS_CHECK(cublasgemm(handle, CUBLAS_OP_N,
-                                CUBLAS_OP_T, var.dim_x, var.dim_z,
-                                var.dim_z, &alfa, var.P_xz, var.dim_x,
-                                var.placeHolder0, var.dim_z, &beta,
-                                var.K, var.dim_x));
-
-        // Fix transpose
-        // Copy the S and perform the second multiplication
-        // T scalar = (T)1.0;
-        // scalarMultiply(var.P_xz, var.K, scalar, var.dim_x * var.dim_z);
-
-        alfa = (T)1.0, beta = (T)0.0;
-        CUBLAS_CHECK(cublasgemm(handle, CUBLAS_OP_N,
-                                CUBLAS_OP_N, var.dim_x, var.dim_z,
-                                var.dim_z, &alfa, var.K, var.dim_x,
-                                var.placeHolder0, var.dim_z, &beta,
-                                var.K, var.dim_x));
+        // Compute K / S_y to K || K * S_z = alfa * P_zz
+        CUBLAS_CHECK(cublastrsm(handle, CUBLAS_SIDE_RIGHT, var.sg->uplo, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT,
+                    var.dim_x, var.dim_z, &alfa, var.P_zz, var.dim_z, var.K, var.dim_x));
     }
     else
     {
@@ -329,7 +307,6 @@ void update_covariance(Variables<T> &var, cublasHandle_t handle, cusolverDnHandl
         // SUKF
         // Compute U
         T alfa = (T)1.0, beta = (T)0.;
-        printf("%d %d", var.dim_z, var.dim_x);
         CUBLAS_CHECK(cublasgemm(handle, CUBLAS_OP_N,
                         CUBLAS_OP_N, var.dim_x, var.dim_z,
                         var.dim_z, &alfa, var.K, var.dim_x,
@@ -338,13 +315,17 @@ void update_covariance(Variables<T> &var, cublasHandle_t handle, cusolverDnHandl
         // Compute S with cholupdate
         // false triggers a negative coefficient
         // loop over the cols of U
-
+        // The argument true corresponds to a positive sum
+        bool sign = false;
+        printf("Update covariance \n");
         print_matrix(var.U, var.dim_x, var.dim_z, "U");
         for (size_t i = 0; i < var.dim_z; i++)
         {
-            chol_update(var.P_xx, var.U + i * var.dim_x, var.dim_x, false,
-                        CUBLAS_FILL_MODE_LOWER, handle_sol,
-                        handle, var.workspace_cholesky, &var.Lwork);
+            print_matrix(var.P_xx, var.dim_x, var.dim_x, "P_xx");
+            // Upper because geqrf fills the upper triangular side of the matrix
+            chol_update(var.P_xx, var.U + i * var.dim_x, var.dim_x, sign,
+                        var.sg->uplo, handle_sol,
+                        handle, var.sg->workspace_chol_decomp, &var.sg->chol_Lwork);
         }
     }
     else
@@ -424,7 +405,8 @@ template <typename T>
 void predict(Variables<T> &var, cublasHandle_t handle)
 {
     ASSERT(var.initialized, "kf::unscented::predict: 'init' not called!");
-    printf("predict \n");
+    print_matrix(var.x_est, var.dim_x, 1, "x_est");
+    print_matrix(var.P_xx, var.dim_x, var.dim_x, "P_xx");
     predict_xP(var, handle);
 }
 
@@ -443,20 +425,17 @@ void update(Variables<T> &var, T *_z, cublasHandle_t handle, cusolverDnHandle_t 
 {
     ASSERT(var.initialized, "kf::unscented::update: 'init' not called!");
     var.z = _z;
+    print_matrix(var.x_est, var.dim_x, 1, "x_est");
+    print_matrix(var.P_xx, var.dim_x, var.dim_x, "P_xx");
     transform_to_measurement(var, handle);
     find_P_zz(var, handle);
+    print_matrix(var.X_h, var.dim_x, 1, "z_est || x_h");
     print_matrix(var.P_zz, var.dim_z, var.dim_z, "P_zz");
-    printf("2\n");
     find_P_xz(var, handle);
     print_matrix(var.P_xz, var.dim_x, var.dim_z, "P_xz");
-    // printf("P_xz matrix \n");
-    // print_matrix(var.P_xz, var.dim_x, var.dim_z);
-    printf("3\n");
     find_kalman_gain(var, handle, handle_sol);
     print_matrix(var.K, var.dim_x, var.dim_z, "K");
-    printf("4\n");
     update_estimate(var, handle, handle_sol);
-    printf("5\n");
     update_covariance(var, handle, handle_sol);
 }
 

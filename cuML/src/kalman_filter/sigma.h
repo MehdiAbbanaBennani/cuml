@@ -32,14 +32,13 @@ private:
   const double epsilon = 1.e-9;
   T lambda;
   bool sqroot;
-  cublasFillMode_t uplo = CUBLAS_FILL_MODE_LOWER;
   // not so much
   const T alfa, beta, kappa;
   T *P = nullptr, *X = nullptr, *x = nullptr, *M = nullptr;
   // M is used for computing the qr decomposition, sqrt(w)*(x - bar(x))
-  T *workspace_chol_decomp = nullptr;
   T *workspace_qr_decomp = nullptr;
-  int *info, chol_Lwork, qr_Lwork, info_h;
+  // int *info, chol_Lwork, qr_Lwork, info_h;
+  int *info, qr_Lwork, info_h;
   cublasHandle_t cublasHandle;
   cusolverDnHandle_t cusolverHandle;
   bool deinitilized = false;
@@ -59,6 +58,14 @@ private:
   }
 
 public:
+  // Attributes
+  // Upper because the upper triangular part of covariance is filled through qr decomposition with the sqrt matrix
+  cublasFillMode_t uplo = CUBLAS_FILL_MODE_UPPER;
+  int chol_Lwork;
+  T *workspace_chol_decomp = nullptr;
+
+
+  // Methods
   VanDerMerwe() = delete;
   /**
       * @brief initialize VanDerMerwe
@@ -200,18 +207,16 @@ public:
 
     if (sqroot)
     {
-
-      // TODO : fix scalar multiply
-      // Update the difference matrix with the corresponding weights
+      // Compute the weighted difference matrix
       CUDA_CHECK(cudaMemset(M, 0, sizeof(T) * dim * nPts));
-      T scalar = (T)std::sqrt(weights[0]);
+      T scalar = (T) weights[0];
       scalarMultiply(M, matrix_diff, scalar, dim);
       scalar = std::sqrt(weights[1]);
       scalarMultiply(M, matrix_diff + dim, scalar, 2 * dim * dim);
 
       // Compute the square root matrix through QR decomposition
       CUSOLVER_CHECK(LinAlg::cusolverDngeqrf(cusolverHandle,
-                                             dim, 2 * dim, M + dim, dim,
+                                             dim, 2 * dim, covariance + dim, dim,
                                              covariance, workspace_qr_decomp, qr_Lwork, info));
 
       updateHost(&info_h, info, 1);

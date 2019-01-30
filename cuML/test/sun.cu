@@ -147,10 +147,13 @@ public:
 
         for (int q = 0; q < iterations; q++)
         {
+            printf(" \n  ----- Step %d -----", q);
+            printf(" \n Predict ... \n ");
             predict(vars, cublas_handle);
             // generating measurement
             z[0] = q + distribution(generator);
             updateDevice(z_d, z, dim_z);
+            printf(" \n Update ... \n");
             update(vars, z_d, cublas_handle, cusolver_handle);
             // getting update
             updateHost(x_up, x_up_d, dim_x);
@@ -181,14 +184,10 @@ public:
 
 int main(){
     // double
-    const std::vector<kf::unscented::UnKFInputs<double>> inputsd = {
-        // SUNKF
-        // {0.6, 2, 1, 100, 1e-3, 2.0, 0.0, kf::unscented::Inverse::Explicit, 6ULL, false},
-        {0.6, 2, 1, 100, 1e-3, 2.0, 0.0, kf::unscented::Inverse::Explicit, 6ULL, true}
-        };
+    const kf::unscented::UnKFInputs<double> inputd = 
+    {0.6, 2, 1, 100, 1e-3, 2.0, 0.0, kf::unscented::Inverse::Explicit, 6ULL, true};
 
     kf::unscented::SUNKF<double> unkf_test;
-    unkf_test.SetUp(inputsd[0]);
-    unkf_test.SetUp(inputsd[1]);
+    unkf_test.SetUp(inputd);
     return 0;
 }

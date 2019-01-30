@@ -91,7 +91,6 @@ protected: // functions
         updateDevice(H_d, H, dim_z * dim_x);
 
         // kf initialization
-        printf("Step 0 \n");
         Variables<T> vars;
         size_t workspaceSize;
         init(vars, dim_x, dim_z, alpha_s, beta_s, kappa_s, inv,
@@ -102,8 +101,6 @@ protected: // functions
              x_est_d, x_up_d, Phi_d, P_up_d, Q_d, R_d, H_d, sqrt, workspace,
              workspaceSize, cusolver_handle);
 
-printf("Step 1 \n");
-
         // for random noise
         std::default_random_engine generator(params.seed);
         std::normal_distribution<T> distribution(0.0,1.0);
@@ -111,16 +108,13 @@ printf("Step 1 \n");
 
         for (int q = 0; q < iterations; q++) {
 
-printf("Step 3 \n");
             predict(vars, cublas_handle);
             // generating measurement
             z[0] = q + distribution(generator);
             updateDevice(z_d, z, dim_z);
-printf("Step 4 \n");
             update(vars, z_d, cublas_handle, cusolver_handle);
             // getting update
             updateHost(x_up, x_up_d, dim_x);
-printf("Step 5 \n");
             // summing squared ratios
             rmse_v += pow(x_up[1]-1, 2); // true velo is alwsy 1
             rmse_x += pow(x_up[0]-q, 2);
