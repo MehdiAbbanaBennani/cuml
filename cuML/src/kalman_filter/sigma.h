@@ -4,6 +4,7 @@
 #include "utils.h"
 #include "cuda_utils.h"
 #include "linalg/eltwise.h"
+#include "linalg/transpose.h"
 #include "linalg/cublas_wrappers.h"
 #include "linalg/cusolver_wrappers.h"
 #include "random/mvg.h"
@@ -22,6 +23,7 @@ using MLCommon::LinAlg::scalarMultiply;
 using MLCommon::Random::fill_uplo;
 using MLCommon::Random::Filler;
 using MLCommon::Random::matVecAdd;
+using MLCommon::LinAlg::transpose;
 
 template <typename T>
 class VanDerMerwe
@@ -60,7 +62,7 @@ private:
 public:
   // Attributes
   // Upper because the upper triangular part of covariance is filled through qr decomposition with the sqrt matrix
-  cublasFillMode_t uplo = CUBLAS_FILL_MODE_UPPER;
+  cublasFillMode_t uplo = CUBLAS_FILL_MODE_LOWER;
   int chol_Lwork;
   T *workspace_chol_decomp = nullptr;
 
@@ -209,23 +211,39 @@ public:
     {
       // Compute the weighted difference matrix
       CUDA_CHECK(cudaMemset(M, 0, sizeof(T) * dim * nPts));
+
       T scalar = (T) weights[0];
-      scalarMultiply(M, matrix_diff, scalar, dim);
+      scalarMultiply(matrix_diff, matrix_diff, scalar, dim);
       scalar = std::sqrt(weights[1]);
-      scalarMultiply(M, matrix_diff + dim, scalar, 2 * dim * dim);
+      scalarMultiply(matrix_diff + dim, matrix_diff + dim, scalar, dim * (nPoints - 1));
+
+      // Transpose the weighted diffs matrix in order to compute the QR deocmposition with the right input shape 
+      // x_0 is not included in the transpose
+      transpose(matrix_diff + dim, M + dim, dim, nPoints - 1, cublasHandle);
+
+      // M + dim is now (nPoints -1, dim)
 
       // Compute the square root matrix through QR decomposition
+      // The covariance parameter values will be later overrided, they are not important (Tau in the  cuBLAS API)
       CUSOLVER_CHECK(LinAlg::cusolverDngeqrf(cusolverHandle,
-                                             dim, 2 * dim, covariance + dim, dim,
+                                             nPoints - 1, dim, M + dim, nPoints - 1,
                                              covariance, workspace_qr_decomp, qr_Lwork, info));
 
       updateHost(&info_h, info, 1);
       ASSERT(info_h == 0, "sigma qr decomposition: error in geqrf, info=%d | expected=0", info_h);
 
+      // The upper traingular part of M + dim contains the sqrt values
+      // Transpose the resulting matrix to keep only the lower triangular part in column major format stored in covariance
+      transpose(M + dim, matrix_diff + dim, nPoints - 1, dim, cublasHandle);
+      
+      // Copy the matrix of size (dim, dim ) to covariance, the lower triangular part contains the sqrt matrix values
+      CUDA_CHECK(cudaMemcpy(covariance, matrix_diff + dim, sizeof(T) * dim * dim,
+                        cudaMemcpyDeviceToDevice));
+
       // Update the square root matrix with the cholesky update
       // The argument true corresponds to a positive sum
       bool sign = true;
-      chol_update(covariance, M, dim, sign,
+      chol_update(covariance, matrix_diff, dim, sign,
                   uplo, cusolverHandle,
                   cublasHandle, workspace_chol_decomp, &chol_Lwork);
     }

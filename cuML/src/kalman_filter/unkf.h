@@ -425,16 +425,28 @@ void update(Variables<T> &var, T *_z, cublasHandle_t handle, cusolverDnHandle_t 
 {
     ASSERT(var.initialized, "kf::unscented::update: 'init' not called!");
     var.z = _z;
+    
     print_matrix(var.x_est, var.dim_x, 1, "x_est");
     print_matrix(var.P_xx, var.dim_x, var.dim_x, "P_xx");
+    print_matrix(var.X, var.dim_x, var.nPoints, "X");
+    printf("Tranform to measurement");
+    
     transform_to_measurement(var, handle);
+    print_matrix(var.X_h, var.dim_z, var.nPoints, "z_est || x_h");
+    
     find_P_zz(var, handle);
-    print_matrix(var.X_h, var.dim_x, 1, "z_est || x_h");
+    
+    print_matrix(var.eig_z, var.dim_z, 1, "z_est_bar || eig_z");
     print_matrix(var.P_zz, var.dim_z, var.dim_z, "P_zz");
+    
     find_P_xz(var, handle);
+    
     print_matrix(var.P_xz, var.dim_x, var.dim_z, "P_xz");
+    
     find_kalman_gain(var, handle, handle_sol);
+    
     print_matrix(var.K, var.dim_x, var.dim_z, "K");
+    
     update_estimate(var, handle, handle_sol);
     update_covariance(var, handle, handle_sol);
 }
