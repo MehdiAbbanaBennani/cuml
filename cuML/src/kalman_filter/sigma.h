@@ -13,6 +13,20 @@
 
 #include "chol_update.h"
 
+// template <typename T>
+// void print_matrix(T* gpu, int rows, int cols, const std::string& msg){
+//     T* cpu;
+//     cpu = (T *)malloc(sizeof(T)*rows*cols);
+//     MLCommon::updateHost(cpu, gpu, rows*cols);
+//     printf("\n\n");
+//     printf("%s\n", msg.c_str());
+//     for (int i = 0; i < rows; i++){
+//         for (int j = 0; j < cols; j++)
+//             printf("%f | ", cpu[IDX2C(i, j , rows)]);
+//         printf("\n");
+//     }
+// }
+
 namespace kf
 {
 namespace sigmagen
@@ -33,7 +47,7 @@ private:
   const int dim, nPoints;
   const double epsilon = 1.e-9;
   T lambda;
-  bool sqroot;
+  
   // not so much
   const T alfa, beta, kappa;
   T *P = nullptr, *X = nullptr, *x = nullptr, *M = nullptr, *Temp  = nullptr;
@@ -68,6 +82,7 @@ public:
   cublasFillMode_t uplo = CUBLAS_FILL_MODE_LOWER;
   int chol_Lwork;
   T *workspace_chol_decomp = nullptr;
+  bool sqroot;
 
 
   // Methods
@@ -218,6 +233,11 @@ public:
       CUDA_CHECK(cudaMemset(Temp, 0, sizeof(T) * dim * (nPoints + dim)));
       CUDA_CHECK(cudaMemset(covariance, 0, sizeof(T) * dim * dim));
 
+
+      // printf(" ----- Inside find covariance");
+      // print_matrix(matrix_diff, dim, nPts, "matrix_diff");
+
+
       T scalar = (T) weights[0];
       scalarMultiply(M, matrix_diff, scalar, dim);
       scalar = std::sqrt(weights[1]);
@@ -226,24 +246,34 @@ public:
       // Copy the noise matrix at the end of M 
       CUDA_CHECK(cudaMemcpy(M + nPoints * dim, noise, sizeof(T) * dim * dim, cudaMemcpyDeviceToDevice));
 
+      // print_matrix(M, dim, nPts + dim, "M before transpose");
+
       // Transpose the weighted diffs (M + dim) to get the right shape for QR 
-      transpose(M + dim, Temp + dim, dim, nPoints - 1, cublasHandle);
+      transpose(M + dim, Temp + dim, dim, nPoints - 1 + dim, cublasHandle);
+
+    // print_matrix(Temp + dim, nPts + dim - 1, dim, "Temp + dim after transpose");
 
       // Compute the square root matrix through QR decomposition
       // The covariance parameter values will be later overrided, they are not important (Tau in the  cuBLAS API)
       CUSOLVER_CHECK(LinAlg::cusolverDngeqrf(cusolverHandle,
-                                             nPoints - 1, dim, Temp + dim, nPoints - 1,
+                                             nPoints - 1 + dim, dim, Temp + dim, nPoints - 1 + dim,
                                              covariance, workspace_qr_decomp, qr_Lwork, info));
 
       updateHost(&info_h, info, 1);
       ASSERT(info_h == 0, "sigma qr decomposition: error in geqrf, info=%d | expected=0", info_h);
 
+    // print_matrix(Temp + dim, nPts + dim - 1, dim, "Temp + dim after qr");
+
       // The upper traingular part of M + dim contains the sqrt values
       // Transpose the resulting matrix to keep only the lower triangular part in column major format
-      transpose(Temp + dim, M + dim, nPoints - 1, dim, cublasHandle);
-      
+      transpose(Temp + dim, M + dim, nPoints - 1 + dim, dim, cublasHandle);
+
+// print_matrix(M + dim, dim, nPts + dim - 1, "M + dim after second transpose");
+
       // Copy the matrix of size (dim, dim) to covariance, the lower triangular part contains the sqrt matrix values
       CUDA_CHECK(cudaMemcpy(covariance, M + dim, sizeof(T) * dim * dim, cudaMemcpyDeviceToDevice));
+
+// print_matrix(covariance, dim, dim, "covariance before chol");
 
       // Update the square root matrix with the cholesky update
       // The argument true corresponds to a positive sum
@@ -251,6 +281,10 @@ public:
       chol_update(covariance, M, dim, sign,
                   uplo, cusolverHandle,
                   cublasHandle, workspace_chol_decomp, &chol_Lwork);
+
+
+      // print_matrix(covariance, dim, dim, "covariance after chol");
+                  // printf(" ----- Quit find covariance");
     }
 
     else

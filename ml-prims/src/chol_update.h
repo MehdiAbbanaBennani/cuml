@@ -22,6 +22,21 @@
 #include "linalg/cublas_wrappers.h"
 #include "linalg/cusolver_wrappers.h"
 
+#include "cuda_utils.h"
+
+template <typename T>
+void print_matrix(T* gpu, int rows, int cols, const std::string& msg){
+    T* cpu;
+    cpu = (T *)malloc(sizeof(T)*rows*cols);
+    MLCommon::updateHost(cpu, gpu, rows*cols);
+    printf("\n\n");
+    printf("%s\n", msg.c_str());
+    for (int i = 0; i < rows; i++){
+        for (int j = 0; j < cols; j++)
+            printf("%f | ", cpu[IDX2C(i, j , rows)]);
+        printf("\n");
+    }
+}
 
 namespace MLCommon {
 namespace LinAlg {
@@ -32,13 +47,13 @@ using MLCommon::Random::Filler;
 /**
  * @defgroup Cholesky rank 1 update
  * @tparam T: the data type of the matrices
- * @param sqrt: input sqroot matrix that is rank 1 updated,
+ * @param sqrt: input sqroot matrix that is rank 1 updated, 
           at the same location updated sqroot matrix is kept after the function returns
  * @param vctr: vector that would be update sqrt by taking outer product with itself
  * @param dim: dimension of input vctr
  * @param sign: bool, if true, add.
  * @param uplo: if matrix is lower or upper triangular
- * @param workspace: if value is nullptr, work_size is updated to give the workspace
+ * @param workspace: if value is nullptr, work_size is updated to give the workspace 
           size requirement. Else pointer to the workspace should be provided.
  * @param work_size: size of the workspace required by the function
  */
@@ -46,6 +61,7 @@ template <typename T>
 void chol_update(T *sqrt, T *vctr, int dim, bool sign,
                  cublasFillMode_t uplo, cusolverDnHandle_t cusolverH,
                  cublasHandle_t cublasH, void *workspace, int *work_size){
+   
     // give the workspace requirements
     int granuality = 256;
     if (workspace == nullptr) {
@@ -64,17 +80,20 @@ void chol_update(T *sqrt, T *vctr, int dim, bool sign,
     int *info = (int *)(&((T *)workspace)[Lwork]); // correcting types
     // find the full error cov.
     T alpha = (T)1.0, beta = (T)0.0;
+    CUBLAS_CHECK(cublasgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_T, dim, dim, dim,
+                            &alpha, sqrt, dim, sqrt, dim, &beta, sqrt, dim));
     if (sign == false) {
         alpha = (T)-1.0;
     }
-    CUBLAS_CHECK(cublasgemm(cublasH, CUBLAS_OP_N, CUBLAS_OP_T, dim, dim, dim,
-                            &alpha, sqrt, dim, sqrt, dim, &beta, sqrt, dim));
     // find the outer product of the vector and add/sub to matrix
     CUBLAS_CHECK(cublasger(cublasH, dim, dim, &alpha, vctr, 1, vctr, 1, sqrt, dim));
     // find the sqrt of the modified matrix
+
+    print_matrix(sqrt, dim, dim, "sqrt before factorisation");
+
     CUSOLVER_CHECK(cusolverDnpotrf(cusolverH, uplo, dim, sqrt, dim,
                                    (T *)workspace, Lwork, info));
-    int info_h;
+    int info_h = 0;
     updateHost(&info_h, info, 1);
     ASSERT(info_h == 0, "chol_update: error in potrf, info=%d | expected=0", info_h);
     // opposite part being filled with 0.0
@@ -90,3 +109,4 @@ void chol_update(T *sqrt, T *vctr, int dim, bool sign,
 
 }; // end namespace LinAlg
 }; // end namespace MLCommon
+

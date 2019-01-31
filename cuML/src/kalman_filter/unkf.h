@@ -305,16 +305,31 @@ void update_covariance(Variables<T> &var, cublasHandle_t handle, cusolverDnHandl
         // loop over the cols of U
         // The argument true corresponds to a positive sum
         bool sign = false;
-        printf("Update covariance \n");
+        // printf("Update covariance \n");
         print_matrix(var.U, var.dim_x, var.dim_z, "U");
-        for (size_t i = 0; i < var.dim_z; i++)
-        {
-            print_matrix(var.P_xx, var.dim_x, var.dim_x, "P_xx");
-            // Upper because geqrf fills the upper triangular side of the matrix
-            chol_update(var.P_xx, var.U + i * var.dim_x, var.dim_x, sign,
-                        var.sg->uplo, handle_sol,
-                        handle, var.sg->workspace_chol_decomp, &var.sg->chol_Lwork);
-        }
+        print_matrix(var.P_xx, var.dim_x, var.dim_x, "P_xx");
+
+        // alfa = (T)1.0, beta = (T)1.0;
+        // CUBLAS_CHECK(cublasgemm(handle, CUBLAS_OP_N,
+        //                         CUBLAS_OP_T, var.dim_x, var.dim_x,
+        //                         var.dim_z, &alfa, var.U, var.dim_x,
+        //                         var.U, var.dim_x, &beta,
+        //                         var.P_xx, var.dim_x));
+        // print_matrix(var.P_xx, var.dim_x, var.dim_x, "U * U^T");
+        
+        
+        // print_matrix(var.U, var.dim_x, var.dim_z, "KPK^T");
+              chol_update(var.P_xx, var.U, var.dim_x, sign,
+                  var.sg->uplo, handle_sol,
+                  handle, var.sg->workspace_chol_decomp, &var.sg->chol_Lwork);
+
+        // for (size_t i = 0; i < var.dim_z; i++)
+        // {
+        //     chol_update(var.P_xx, var.U + i * var.dim_x, var.dim_x, sign,
+        //                 var.sg->uplo, handle_sol,
+        //                 handle, var.sg->workspace_chol_decomp, &var.sg->chol_Lwork);
+        
+        // }
     }
     else
     {
@@ -436,9 +451,43 @@ void update(Variables<T> &var, T *_z, cublasHandle_t handle, cusolverDnHandle_t 
     find_kalman_gain(var, handle, handle_sol);
     
     print_matrix(var.K, var.dim_x, var.dim_z, "K");
+
+
+    ////////////////
+
+    var.Wc[1] = 0.2;
+    var.Wc[0] = 0.2;
+
+    // sqrt = False
+    // printf("-------------------------------");
+    // printf("\n sqrt is false");
+    
+    
+    // var.sg->sqroot = false;
+    // var.sg->find_covariance(var.dim_x, var.nPoints, var.Wc,
+    //                         var.x_est, var.X, var.X_er, var.P_xx, var.Q);
+    // print_matrix(var.P_xx, var.dim_x, var.dim_x, "P_xx");
+
+    // // sqrt = True
+    // printf("sqrt is true");
+    // var.sg->sqroot = true;
+    // var.sg->find_covariance(var.dim_x, var.nPoints, var.Wc,
+    //                         var.x_est, var.X, var.X_er, var.P_xx, var.Q);
+    // // Compute the square matrix
+    // T alfa = 1, beta = (T)0.0;
+    // CUBLAS_CHECK(LinAlg::cublasgemm(handle, CUBLAS_OP_T,
+    //                             CUBLAS_OP_N, var.dim_x, var.dim_x, var.dim_x,
+    //                             &alfa, var.P_xx,
+    //                             var.dim_x, var.P_xx, var.dim_x,
+    //                             &beta, var.Q, var.dim_x));
+    // print_matrix(var.Q, var.dim_x, var.dim_x, "P_xx");
+    // printf("-------------------------------");
+    // //////////////////
     
     update_estimate(var, handle, handle_sol);
+    print_matrix(var.x_est, var.dim_x, 1, "updated x_bar");
     update_covariance(var, handle, handle_sol);
+    print_matrix(var.P_xx, var.dim_x, var.dim_x, "Updated P_xx");
 }
 
 }; // namespace unscented

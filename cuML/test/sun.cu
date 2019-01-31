@@ -97,16 +97,32 @@ public:
         Phi[1] = 0.0;
         Phi[2] = 1.0;
         Phi[3] = 1.0;
-        P_up[0] = 10.0;
-        P_up[1] = 0.0;
-        P_up[2] = 0.0;
-        P_up[3] = 10.0;
-        R[0] = 10.0;
-        T var = 0.001;
-        Q[0] = 0.25 * var;
-        Q[1] = 0.5 * var;
-        Q[2] = 0.5 * var;
-        Q[3] = 1.1 * var;
+
+        if(sqrt){
+            P_up[0] = 5.0;
+            P_up[1] = 0.0;
+            P_up[2] = 0.0;
+            P_up[3] = 5.0;
+            R[0] = 2.0;
+            Q[0] = 2;
+            Q[1] = 0;
+            Q[2] = 0;
+            Q[3] = 2;
+        }
+        else{
+            P_up[0] = 25.0;
+            P_up[1] = 0.0;
+            P_up[2] = 0.0;
+            P_up[3] = 25.0;
+            R[0] = 4.0;
+            Q[0] = 4;
+            Q[1] = 0;
+            Q[2] = 0;
+            Q[3] = 4;
+        }
+
+        // T var = 0.001;
+
         H[0] = 1.0;
         H[1] = 0.0;
 
@@ -184,10 +200,22 @@ public:
 
 int main(){
     // double
-    const kf::unscented::UnKFInputs<double> inputd = 
-    {0.6, 2, 1, 100, 1e-3, 2.0, 0.0, kf::unscented::Inverse::Explicit, 6ULL, true};
+    // const kf::unscented::UnKFInputs<double> inputd = 
+    // {0.6, 2, 1, 1, 1e-3, 2.0, 0.0, kf::unscented::Inverse::Explicit, 6ULL, true};
+    
 
-    kf::unscented::SUNKF<double> unkf_test;
-    unkf_test.SetUp(inputd);
+    const std::vector<kf::unscented::UnKFInputs<double> > inputsd = {
+        { 0.6, 2, 1,  1,  1e-3,  2.0,  0.0, kf::unscented::Inverse::Explicit, 6ULL, true},
+        { 0.6, 2, 1,  1,  1e-3,  2.0,  0.0, kf::unscented::Inverse::Explicit, 6ULL, false},
+      };
+      printf(" \n ----------------------- No sqrt ----------------- \n");
+      kf::unscented::SUNKF<double> unkf_test;
+      unkf_test.SetUp(inputsd[1]);
+
+    printf(" \n ----------------------- Sqrt ----------------- \n");
+    // kf::unscented::SUNKF<double> unkf_test;
+    unkf_test.SetUp(inputsd[0]);
+    
+
     return 0;
 }
