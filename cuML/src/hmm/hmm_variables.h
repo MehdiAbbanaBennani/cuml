@@ -14,8 +14,8 @@ template <typename T>
 struct HMM {
         GMM<T>& gmm;
 
-        T *dT;
-        int *dV, **dV_array;
-        T **dAlpha_array, **dBeta_array
-        int lddt, lddv;
+        // Transition and emission matrixes
+        T *dT, dB;
+        T **dAlpha_array, **dBeta_array, **dGamma_array;
+        int lddt, lddv, lddb, lddalpha, lddbeta, lddgamma;
 };
