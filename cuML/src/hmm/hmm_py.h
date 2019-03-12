@@ -1,6 +1,6 @@
 #pragma once
 
-void init_f32(HMM<float> &hmm);
+void init_hmm_f32(HMM<float> &hmm);
 
 void forward_f32(HMM<float>& hmm,
                  float* dX,
@@ -12,6 +12,6 @@ void backward_f32(HMM<float>& hmm,
                   int* len_array,
                   int nObs);
 
-void setup_f32(GMM<float> &gmm);
+void setup_hmm_f32(HMM<float> &hmm);
 
-void free_f32(GMM<float> &gmm);
+void free_hmm_f32(HMM<float> &hmm);
