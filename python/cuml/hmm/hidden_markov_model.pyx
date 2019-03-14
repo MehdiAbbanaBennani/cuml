@@ -29,6 +29,10 @@ from libc.stdint cimport uintptr_t
 from libc.stdlib cimport calloc, malloc, free
 
 from cuml.hmm.sample_utils import *
+from cuml.hmm.hmm_base import HMMBase
+
+from libcpp.vector cimport vector
+
 
 cdef extern from "hmm/hmm_variables.h" :
     cdef cppclass HMM[T]:
@@ -48,60 +52,38 @@ cdef extern from "hmm/hmm_py.h" nogil:
                           int*,
                           int)
 
-RUP_SIZE = 32
+class GMMHMM(HMMBase):
+    def __init__(self, ):
+        super().__init__()
 
-class GMMHMM:
+    cdef setup_hmm(self):
+        cdef vector[double*] *_dmu_ptr_vector = new vector[double*]()
+        cdef int i
 
-    def _get_ctype_ptr(self, obj):
-        return obj.device_ctypes_pointer.value
+        for i in range(self.n_mix):
+            cdef uintptr_t _dmu_ptr = self.gmms[i].dParams["mus"].device_ctypes_pointer.value
+            cdef uintptr_t _dsigma_ptr = self.gmms[i].dParams["sigmas"].device_ctypes_pointer.value
+            cdef uintptr_t _dPis_ptr = self.gmms[i].dParams["pis"].device_ctypes_pointer.value
+            cdef uintptr_t _dPis_inv_ptr = self.gmms[i].dParams["inv_pis"].device_ctypes_pointer.value
 
-    def _get_column_ptr(self, obj):
-        return self._get_ctype_ptr(obj._column._data.to_gpu_array())
+            _dmu_ptr_vector.push_back(_dmu_ptr)
+        #     TODO : Complete it
 
-    def _get_dtype(self, precision):
-        return {
-            'single': np.float32,
-            'double': np.float64,
-        }[precision]
+            cdef HMM[float] hmm
 
-    # TODO : Fix the default values
-    def __init__(self, n_components=1, n_mix=1, min_covar=0.001, startprob_prior=1.0, transmat_prior=1.0, weights_prior=1.0, means_prior=0.0, means_weight=0.0, covars_prior=None, covars_weight=None, algorithm='viterbi', covariance_type='diag', random_state=None, n_iter=10, tol=0.01, verbose=False, params="stmcw", init_params="stmcw"):
-        self.precision = precision
-        self.dtype = self._get_dtype(precision)
+            if self.precision == 'double':
+                with nogil:
+                    init_f32()
 
-        self.n_components = n_components
-        self.tol = tol
+        return hmm
 
+    def predict_proba(self, X, lengths=None):
+        cdef HMM[float] hmm
+        hmm = self.setup_hmm()
 
-      def _initialize_parameters(self, X, lengths):
+        # TODO: Fix this part
+        cdef uintptr_t _dX_ptr = self.dParams["x"].device_ctypes_pointer.value
 
-        if lengths is None :
-          self.nObs = X.shape[0]
-        else :
-          self.nObs =
-
-        self.nDim = X.shape[1]
-        self.nCl = self.n_components
-
-        self.ldd = {"x" : roundup(self.nDim, RUP_SIZE),
-                    "mus" : roundup(self.nDim, RUP_SIZE),
-                    "sigmas" : roundup(self.nDim, RUP_SIZE),
-                     "llhd" : roundup(self.nCl, RUP_SIZE),
-                    "pis" : roundup(self.nCl, RUP_SIZE),
-                    "inv_pis" : roundup(self.nCl, RUP_SIZE)}
-
-        params = sample_parameters(self.nDim, self.nCl)
-        params["llhd"] = sample_matrix(self.nCl, self.nObs, isColNorm=True)
-        params['inv_pis'] = sample_matrix(1, self.nCl, isRowNorm=True)
-        params["x"] = X.T
-
-        params = align_parameters(params, self.ldd)
-        params = flatten_parameters(params)
-        params = cast_parameters(params ,self.dtype)
-
-        self.dParams = dict(
-            (key, cuda.to_device(params[key])) for key in self.ldd.keys())
-
-        self.cur_llhd = cuda.to_device(np.zeros(1, dtype=self.dtype))
-
-   def score(X, lengths=None):
+        if self.precision == 'single':
+            with nogil:
+                forward_f32(hmm, <float*> _dX_ptr)

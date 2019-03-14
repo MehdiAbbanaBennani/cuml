@@ -1,0 +1,124 @@
+# Copyright (c) 2018, NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+import pytest
+import cudf
+
+import cuml
+from cuml.hmm.sample_utils import *
+from hmmlearn.hmm import GMMHMM, GaussianHMM, MultinomialHMM
+from cuml.hmm.utils import timer, info
+
+
+def np_to_dataframe(df):
+    pdf = cudf.DataFrame()
+    for c in range(df.shape[1]):
+        pdf[c] = df[:, c]
+    return pdf
+
+
+def mae(x, y):
+    return np.mean(np.abs(x - y))
+
+
+def compute_error(params_pred, params_true):
+    mae_dict = dict(
+        (key, mae(params_pred[key], params_true[key]))
+        for key in params_pred.keys())
+    error = sum([mae_dict[key] for key in mae_dict.keys()]) / 3
+    return mae_dict, error
+
+
+@info
+def sample(nDim, nCl, nObs, precision):
+    if precision == 'single':
+        dt = np.float32
+    else:
+        dt = np.float64
+
+    params = sample_parameters(nDim=nDim, nCl=nCl)
+    X = sample_data(nObs, params)
+    params = cast_parameters(params, dtype=dt)
+    return X, params
+
+
+@timer("sklearn")
+@info
+def run_sklearn(X, n_iter, nCl, tol, reg_covar, random_state):
+
+
+    params = {"mus": hmm.means_,
+              "sigmas": hmm.covariances_,
+              "pis": hmm.weights_}
+
+    return params
+
+
+@timer("cuml")
+@info
+def run_cuml(X, n_iter, precision, nCl, tol, reg_covar, random_state):
+    gmm = cuml.(n_components=nCl,
+                max_iter=n_iter,
+                precision=precision,
+                reg_covar=reg_covar,
+                random_state=random_state,
+                warm_start=False,
+                tol=tol)
+
+    gmm.fit(X)
+
+    params = {"mus": gmm.means_,
+              "sigmas": gmm.covariances_,
+              "pis": gmm.weights_}
+    return params
+
+
+def print_info(true_params, sk_params, cuml_params):
+    print("\n true params")
+    print(true_params)
+
+    print('\nsklearn')
+    mse_dict_sk, error_sk = compute_error(sk_params, true_params)
+    print('error')
+    print(mse_dict_sk)
+    print("params")
+    print(sk_params)
+
+    print('\ncuml')
+    mse_dict_cuml, error_cuml = compute_error(cuml_params, true_params)
+    print('error')
+    print(mse_dict_cuml)
+    print("params")
+    print(cuml_params)
+
+    print('\ncuml-sk')
+    mse_dict_cuml, error_cuml = compute_error(cuml_params, sk_params)
+    print('errors')
+    print(mse_dict_cuml)
+
+
+if __name__ == '__main__':
+
+    X, true_params = sample()
+
+    sk_params = run_sklearn()
+    cuml_params = run_cuml()
+
+    print_info(true_params, sk_params, cuml_params)
+    error_dict, error = compute_error(cuml_params, sk_params)
+    if precision is "single":
+        assert error < 1e-04
+    else:
+        assert error < 1e-12
