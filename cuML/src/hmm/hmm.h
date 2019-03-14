@@ -1,13 +1,41 @@
 #pragma once
 
+#include <vector>
+
+#include "hmm/gmm.h"
 #include "hmm/hmm_backend.h"
 
+namespace hmm {
 
 template <typename T>
-void init(HMM<T> &hmm) {
-        for (size_t stateId = 0; stateId < hmm.nStates; stateId++) {
-                hmm.gmm.dLlhd = hmm.hmm.dGamma + hmm.hmm.lddgamma;
+void init(HMM<T> &hmm,
+          vector<T*> dmu, vector<T*> dsigma, vector<T*> dPis, vector<T*> dPis_inv, T* dLlhd, T* cur_llhd,
+          int lddx, int lddmu, int lddsigma, int lddsigma_full, int lddPis, int lddLlhd,
+          int nCl, int nDim, int nObs,
+          T reg_covar,
+          int nStates,
+          T* dT,
+          int lddt
+          ) {
+
+        hmm.dT = dT;
+        hmm.lddt = lddt;
+        hmm.nStates = nStates;
+
+        for (size_t stateId = 0; stateId < nStates; stateId++) {
+                // TODO : Fix dLlhd allocation
+                gmm::init(hmm.gmm[i],
+                          dmu[stateId],
+                          dsigma[stateId],
+                          dPis[stateId],
+                          dPis_inv[stateId],
+                          dLlhd,
+                          cur_llhd[stateId],
+                          lddx, lddmu, lddsigma, lddsigma_full, lddPis, lddLlhd,
+                          nCl, nDim, nObs,
+                          reg_covar);
         }
+
 }
 
 template <typename T>
@@ -68,7 +96,7 @@ void freeViterbiWs(){
 
 template <typename T>
 void viterbi(HMM<T>& hmm,
-             int *dV_idx_array, int lddv,
+             invector<T*> dV_idx_array, int lddv,
              T* dV_array, int lddv,
              T* dAlpha_array, int lddalpha,
              T* dT, int lddt,
@@ -132,4 +160,7 @@ void em(T* dX, int* len_array, HMM<T>& hmm,
                 // _update_sigmas(dX, hmm.gmms[i], cublasHandle, queue);
                 _m_step(dX, hmm.gmms[i], cublasHandle, queue);
         }
+}
+
+
 }

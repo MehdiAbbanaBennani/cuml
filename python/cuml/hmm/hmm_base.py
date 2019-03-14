@@ -4,7 +4,7 @@ from cuml.hmm.sample_utils import *
 
 RUP_SIZE = 32
 
-class CUMLBase(ABC):
+class _BaseCUML(ABC):
     def _get_ctype_ptr(self, obj):
         return obj.device_ctypes_pointer.value
 
@@ -22,7 +22,7 @@ class CUMLBase(ABC):
         self.dtype = self._get_dtype(precision)
 
 
-class GMMBase(CUMLBase):
+class _BaseGMM(_BaseCUML):
     def __init__(self, precision):
         super().__init__(precision=precision)
         self.dParams = None
@@ -30,7 +30,9 @@ class GMMBase(CUMLBase):
     def initialize(self):
         pass
 
-class HMMBase(CUMLBase):
+
+
+class _BaseHMM(_BaseCUML):
     def __init__(self,
                  n_components=1,
                  n_mix=1,
@@ -74,7 +76,7 @@ class HMMBase(CUMLBase):
         self.params = params
         self.init_params = init_params
 
-        self.gmms = [GMMBase(self.precision) for _ in range(self.n_mix)]
+        self.gmms = [_BaseGMM(self.precision) for _ in range(self.n_mix)]
 
     @abstractmethod
     def fit(self):
@@ -104,8 +106,21 @@ class HMMBase(CUMLBase):
     def score_samples(self, X, lengths=None):
         pass
 
-    def setup(self, X, lengths=None):
+    def _setup(self, X, lengths=None):
         params = dict()
         params["T"] = sample_matrix(self.n_components, self.n_mix, isRowNorm=True)
 
+    def _convert(self):
+        pass
 
+    @property
+    def means_(self):
+        return np.array([gmm.means_ for gmm in self.gmms])
+
+    @property
+    def covars_(self):
+        return np.array([gmm.covariances_ for gmm in self.gmms])
+
+    @property
+    def weights_(self):
+        return np.array([gmm.weights_ for gmm in self.gmms])
